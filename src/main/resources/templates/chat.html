@@ -1,0 +1,357 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat App</title>
+
+    <!-- SockJS -->
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+
+    <!-- STOMP -->
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.1.1/bundles/stomp.umd.min.js"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            background: #e9edef;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 15px;
+        }
+
+        .chat-container {
+            width: 100%;
+            max-width: 500px;
+            height: 650px;
+            background: #ffffff;
+            border-radius: 14px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: #075e54;
+            color: white;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .avatar {
+            width: 45px;
+            height: 45px;
+            background: #128c7e;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+        }
+
+        .header-info h2 {
+            font-size: 20px;
+        }
+
+        #status {
+            font-size: 12px;
+            margin-top: 5px;
+            color: #d8f3e8;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: #f7f9fa;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 12px 15px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .sent {
+            align-self: flex-end;
+            background: #d9fdd3;
+            border-bottom-right-radius: 3px;
+        }
+
+        .received {
+            align-self: flex-start;
+            background: #ffffff;
+            border-bottom-left-radius: 3px;
+        }
+
+        .sender {
+            font-size: 12px;
+            font-weight: bold;
+            color: #075e54;
+            margin-bottom: 5px;
+        }
+
+        .chat-input {
+            padding: 15px;
+            display: flex;
+            gap: 10px;
+            border-top: 1px solid #eeeeee;
+            background: #ffffff;
+        }
+
+        .chat-input input {
+            min-width: 0;
+            padding: 13px 15px;
+            border: 1px solid #dddddd;
+            border-radius: 25px;
+            outline: none;
+            font-size: 14px;
+        }
+
+        #name {
+            width: 110px;
+        }
+
+        #messageInput {
+            flex: 1;
+        }
+
+        .chat-input input:focus {
+            border-color: #075e54;
+        }
+
+        .chat-input button {
+            background: #075e54;
+            color: white;
+            border: none;
+            padding: 0 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .chat-input button:hover {
+            background: #064c44;
+        }
+
+        .chat-input button:disabled {
+            background: #999999;
+            cursor: not-allowed;
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 0;
+            }
+
+            .chat-container {
+                height: 100vh;
+                max-width: 100%;
+                border-radius: 0;
+            }
+
+            .chat-input {
+                padding: 10px;
+                gap: 6px;
+            }
+
+            #name {
+                width: 75px;
+            }
+
+            .chat-input input {
+                padding: 11px;
+            }
+
+            .chat-input button {
+                padding: 0 13px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="chat-container">
+
+    <!-- Header -->
+    <div class="chat-header">
+        <div class="avatar">💬</div>
+
+        <div class="header-info">
+            <h2>Chat App</h2>
+            <div id="status">Connecting...</div>
+        </div>
+    </div>
+
+    <!-- Messages -->
+    <div class="chat-messages" id="chatMessages">
+        <div class="message received">
+            Welcome to the chat! Start messaging.
+        </div>
+    </div>
+
+    <!-- Input -->
+    <div class="chat-input">
+
+        <input type="text"
+               id="name"
+               placeholder="Your name"
+               maxlength="30">
+
+        <input type="text"
+               id="messageInput"
+               placeholder="Type a message..."
+               maxlength="1000">
+
+        <button id="sendButton" onclick="sendMessage()" disabled>
+            Send
+        </button>
+
+    </div>
+
+</div>
+
+<script>
+    const chatMessages = document.getElementById("chatMessages");
+    const nameInput = document.getElementById("name");
+    const messageInput = document.getElementById("messageInput");
+    const sendButton = document.getElementById("sendButton");
+    const statusElement = document.getElementById("status");
+
+    // SockJS + STOMP WebSocket Connection
+    const stompClient = new StompJs.Client({
+
+        webSocketFactory: function () {
+            return new SockJS("/ws");
+        },
+
+        reconnectDelay: 5000,
+
+        onConnect: function () {
+
+            console.log("Connected to WebSocket");
+
+            statusElement.textContent = "Online";
+            sendButton.disabled = false;
+
+            // Subscribe to incoming messages
+            stompClient.subscribe("/topic/messages", function (response) {
+
+                const message = JSON.parse(response.body);
+
+                displayMessage(message);
+            });
+        },
+
+        onDisconnect: function () {
+            statusElement.textContent = "Disconnected";
+            sendButton.disabled = true;
+        },
+
+        onStompError: function (frame) {
+            console.error("STOMP Error:", frame.headers["message"]);
+            statusElement.textContent = "Connection error";
+        },
+
+        onWebSocketError: function (error) {
+            console.error("WebSocket error:", error);
+        }
+    });
+
+    // Start connection
+    stompClient.activate();
+
+    // Send Message
+    function sendMessage() {
+
+        const sender = nameInput.value.trim();
+        const content = messageInput.value.trim();
+
+        if (sender === "") {
+            alert("Please enter your name");
+            nameInput.focus();
+            return;
+        }
+
+        if (content === "") {
+            return;
+        }
+
+        if (!stompClient.connected) {
+            alert("WebSocket is not connected");
+            return;
+        }
+
+        const chatMessage = {
+            sender: sender,
+            content: content
+        };
+
+        // Matches @MessageMapping("/sendmessage")
+        stompClient.publish({
+            destination: "/app/sendmessage",
+            body: JSON.stringify(chatMessage)
+        });
+
+        messageInput.value = "";
+        messageInput.focus();
+    }
+
+    // Display Message
+    function displayMessage(message) {
+
+        const messageDiv = document.createElement("div");
+
+        const currentUser = nameInput.value.trim();
+
+        messageDiv.className =
+            "message " +
+            (message.sender === currentUser ? "sent" : "received");
+
+        const senderDiv = document.createElement("div");
+        senderDiv.className = "sender";
+        senderDiv.textContent = message.sender;
+
+        const contentDiv = document.createElement("div");
+        contentDiv.textContent = message.content;
+
+        messageDiv.appendChild(senderDiv);
+        messageDiv.appendChild(contentDiv);
+
+        chatMessages.appendChild(messageDiv);
+
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Enter key to send
+    messageInput.addEventListener("keydown", function (event) {
+
+        if (event.key === "Enter") {
+            sendMessage();
+        }
+    });
+
+</script>
+
+</body>
+</html>
